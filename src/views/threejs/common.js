@@ -53,7 +53,7 @@ export function screenVector2World(point, dom, camera) {
   if(!point || !dom || !camera) return
     const x = (point.x / dom.clientWidth) * 2 - 1;
     const y = -(point.y / dom.clientHeight) * 2 + 1;
-    const stdVector = new THREE.Vector3(x, y, 0.5);
+    const stdVector = new THREE.Vector3(x, y, 0.7);
     // 将向量转成threejs坐标
     const worldVector = stdVector.unproject(camera);
     return worldVector

@@ -13,6 +13,7 @@ import {
   textureLoaderHandle
 } from './config'
 export default class fullView {
+  onMouseWheelCb = ''
   constructor(container) {
     /**创建场景 */
     this.scene = new Scene();
@@ -28,7 +29,7 @@ export default class fullView {
     /**创建相机 */
     this.camera = new PerspectiveCamera(90, container.width / container.height, 0.1, 100);
     this.camera.aspect = container.clientWidth / container.clientHeight
-    this.camera.position.set(0, 0, 0)
+    // this.camera.position.set(0, 0, 0)
 
     /**最小和最大视角 */
     this.minFov = 0.1
@@ -110,15 +111,14 @@ export default class fullView {
   }
 
   onMouseWheel(event) {
-    console.log("🚀 ~ file: fullView.js:46 ~ fullView ~ onMouseWheel ~ event", event)
     event.preventDefault();
     if (event.deltaY < 0 && this.camera.fov > this.minFov) {
       this.camera.fov--;
     } else if (event.deltaY > 0 && this.camera.fov < this.maxFov) {
       this.camera.fov++;
     }
+    this.onMouseWheelCb && this.onMouseWheelCb()
     this.controls.update()
-    console.log("🚀 ~ file: fullView.js:52 ~ fullView ~ onMouseWheel ~ this.camera.fov", this.camera.fov, this.minFov, this.maxFov)
     this.render()
   }
   async initContent(url) {
@@ -148,8 +148,10 @@ export default class fullView {
     const height = this.container.clientHeight;
     this.renderer?.setSize(width, height);
     //窗口宽高比
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    if(this.camera) {
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+    }
   }
   render() {
     this.camera.updateProjectionMatrix();

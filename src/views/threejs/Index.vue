@@ -2,11 +2,11 @@
   <div class="editor-3d" ref="$el">
     <div class="header">
       <div class="header-wrapper">
-        <div class="sub-title">{{ doc.name }}</div>
+        <div class="sub-title">{{ fullViewStore.name }}</div>
         <div class="right">
-          <el-button class="ma-2" @click="exportAction">导出
+          <el-button class="ma-2" @click="onExportModeClick">导出
           </el-button>
-          <el-button class="ma-2" @click="isShowPreviewDlg = true">预览
+          <el-button class="ma-2" :loading="exportLoading" @click="isShowPreviewDlg = true">预览
           </el-button>
         </div>
       </div>
@@ -30,7 +30,7 @@
           </div>
           <!--热点列表-->
           <div class="hotSpot-list" :key="uniqueId" v-if="$route.name === 'hot' && !isLoading">
-            <div class="hotStop-item" :class="{ 'is-active': item.id === lodash.get(activePoint, 'id') }"
+            <div class="hotStop-item" :class="{ 'is-active': item.id === currentHot?.id }"
               @mousedown="pointDownHandle($event, item)" v-for="(item, index) in hotSpots"
               :style="transformStyle(item.pos, item)" :key="index">
               <img :src="SYS_ICON_MAP1[item.iconPath] || item.iconPath">
@@ -43,11 +43,11 @@
           <!-- 沙盘 -->
           <div class="sand-table-box" v-if="$route.name === 'sandTable'" id="sandTableBox">
             <div class="img">
-              <img :src="doc.sandTable.url" draggable="false">
+              <img :src="fullViewStore.sandTable.url" draggable="false">
             </div>
             <div class="marker-list">
-              <div class="marker-item" v-for="(item, index) in doc.sandTable.markers" :key="index"
-                :class="{ 'is-active': activeMarkerIndex === index }"
+              <div class="marker-item" v-for="(item, index) in fullViewStore.sandTable.markers" :key="index"
+                :class="{ 'is-active': fullViewStore.currentMarkerId === item.id }"
                 :style="{ left: item.pos.x + 'px', top: item.pos.y + 'px' }"
                 @mousedown="markerItemDownHandle($event, item, index)">
                 <div class="marker-item__outline">
@@ -62,12 +62,13 @@
         </div>
         <!--  场景列表  -->
         <div class="scene-list">
-          <div class="scene-item" v-for="(item, index) in doc.scenes" :key="index"
-            :class="{ 'is-active': index === activeIndex }" @click="changeSceneHandle(index)">
+          <div class="scene-item" v-for="(item, index) in fullViewStore.scenes" :key="index"
+            :class="{ 'is-active': fullViewStore.currentScenesId === item.id }" @click="changeSceneHandle(item.id)">
+            <div class="scene-item__del" @click.stop="delScene(index)">X</div>
             <img :src="item.url" alt="">
             <div class="scene-item__name">{{ item.name }}</div>
           </div>
-          <div class="scene-item plus">
+          <div class="scene-item plus" @click="isShowAddSceneDlg = true">
             <div>添加场景</div>
           </div>
         </div>
@@ -86,44 +87,47 @@
           </div>
           <div class="section">
             <div class="section-title">视觉范围设置</div>
-            <el-form>
+            <el-form v-if="currentScene?.params">
               <el-form-item label="初始视角">
-                <el-input-number label="" :max="params.maxFov" :min="params.minFov" v-model="params.fov">
+                <el-input-number label="" :max="currentScene.params?.fovRange?.[1] || 180"
+                  :min="currentScene.params?.fovRange?.[0] || 0.1" v-model="currentScene.params.fov">
                 </el-input-number>
               </el-form-item>
               <el-form-item label="视角范围">
-                <el-slider :min="0.1" range :max="150" :step="0.1" v-model="fovRange"
+                <el-slider :min="0.1" range :max="150" :step="0.1" v-model="currentScene.params.fovRange"
                   @input="changeHandle($event, 'fov')"></el-slider>
               </el-form-item>
               <el-form-item label="水平视角限制">
-                <el-slider :min="-180" range :max="180" :step="1"
-                  v-model="azimuthAngleRange"
+                <el-slider :min="-180" range :max="180" :step="1" v-model="currentScene.params.azimuthAngleRange"
                   @input="changeHandle($event, 'horizontal')"></el-slider>
               </el-form-item>
               <el-form-item label="垂直视角限制">
-                <el-slider :min="-90" range :max="90" :step="1" v-model="polarAngleRange"
+                <el-slider :min="-90" range :max="90" :step="1" v-model="currentScene.params.polarAngleRange"
                   @input="changeHandle($event, 'vertical')"></el-slider>
               </el-form-item>
             </el-form>
           </div>
         </div>
         <div v-else-if="$route.name === 'hot'">
-          <HotSpot :list="hotSpots" :activePoint="activePoint" :doc="lodash.cloneDeep(doc)" @addPoint="addPointHandle"
-            @change="changePointHandle" @cancel="cancelPointHandle" @delPoint="delPointHandle">
+          <HotSpot @addPoint="addPointHandle" @cancel="cancelPointHandle" @delPoint="delPointHandle">
           </HotSpot>
         </div>
         <!-- 沙盘 -->
         <div v-else-if="$route.name === 'sandTable'">
-          <SandTable :sand-table="doc.sandTable" :doc="doc" :activeIndex="activeMarkerIndex"
-            @change="changeSandTableHandle" @changeIndex="changeMarkerIndexHandle"></SandTable>
+          <SandTable @change="changeSandTableHandle" @changeIndex="changeMarkerIndexHandle"></SandTable>
         </div>
       </div>
     </div>
-    <el-dialog v-if="isShowPreviewDlg" width="800px" :fullscreen="false" v-model="isShowPreviewDlg"
+    <el-dialog center v-if="isShowPreviewDlg" fullscreen width="80%" :fullscreen="false" v-model="isShowPreviewDlg"
       :overlay-opacity="0.8" content-class="preview-dlg" @click:outside="isShowPreviewDlg = false">
-      <PreviewDlg :doc="doc">
+      <PreviewDlg :doc="fullViewStore">
       </PreviewDlg>
     </el-dialog>
+    <el-dialog width="800px" :fullscreen="false" v-model="isShowAddSceneDlg" :overlay-opacity="0.8"
+      content-class="preview-dlg" @click:outside="isShowAddSceneDlg = false">
+      <AddScene @change="addScene" @cancel="isShowAddSceneDlg = false" />
+    </el-dialog>
+    <el-progress v-if="progress > 0" :percentage="progress" :show-text="false" style="margin-top: 5px;"></el-progress>
   </div>
 </template>
 
@@ -135,30 +139,25 @@ import lodash from 'lodash'
 import PreviewDlg from './comps/Preview.vue'
 import HotSpot from './comps/HotSpot.vue'
 import SandTable from './comps/SandTable.vue';
+import AddScene from './comps/AddScene.vue';
 import { ICON_MAP, SYS_ICON_MAP1 } from '@/assets/js/const.js'
-import docJSON from '/public/json/doc.json'
+import { useFullView } from '@/store/fullView'
 import { randomString } from '@/assets/js/utils.js'
 import { pointInSceneView, screenVector2World, worldVector2Screen } from './common.js'
-import { menuNav , thumbnail } from './config'
+import { menuNav , thumbnail, generatePackage } from './config'
 import fullViewClass from './fullView';
 const route = useRoute()
 const router = useRouter()
+const fullViewStore = useFullView()
 let fullView
 const $el = ref()
-const doc = ref(docJSON)
 const isShowPreviewDlg = ref(false)
 const activeName = ref('')
 const isLoading = ref(false)
-const activeIndex = ref(0)
-const activePoint = ref({})
 const uniqueId = ref('')
-// 每个场景的透视相机参数
-const params = ref({})
-const polarAngleRange = ref({})
-const azimuthAngleRange = ref({})
-const fovRange = ref({})
-const activeMarkerIndex = ref(0)
-
+const isShowAddSceneDlg = ref(false)
+const exportLoading = ref(false)
+const progress = ref('')
 
 const transformStyle = computed(() => {
 
@@ -179,12 +178,42 @@ const transformStyle = computed(() => {
   }
 })
 
-const activeItem = computed(() => {
-  return doc.value.scenes[activeIndex.value]
+const currentScene = computed(() => {
+  return fullViewStore.currentScene
+})
+const currentHot = computed(() => {
+  return fullViewStore.currentHot
 })
 const hotSpots = computed(() => {
-  return doc.value.scenes[activeIndex.value].hotSpots
+  return currentScene.value?.hotSpots
 })
+const currentMarker = computed(() => {
+  return fullViewStore.currentMarker
+})
+
+const addScene = (data) => {
+  const sceneId = randomString()
+  fullViewStore.scenes.push({
+    id: sceneId,
+    name: data.name,
+    url: data.url,
+    params: {
+      fovRange: [0.1, 150],
+      azimuthAngleRange: [-180, 180],
+      polarAngleRange: [-90, 90],
+      fov: 70,
+    },
+    hotSpots: [],
+    cameraPos: {
+      x:0,
+      y:0,
+      z:0.00000001
+    },
+    angleX: 0
+  })
+  changeSceneHandle(sceneId)
+  isShowAddSceneDlg.value = false
+}
 // 添加热点：
 const addPointHandle = (data) => {
   const rect = fullView.container.getBoundingClientRect();
@@ -193,26 +222,20 @@ const addPointHandle = (data) => {
   const pos = screenVector2World({ x: centerX, y: centerY }, fullView.container, fullView.camera);
   const point = lodash.cloneDeep(data);
   point.pos = pos;
-  doc.value.scenes[activeIndex.value].hotSpots.push(point);
-  activePoint.value = point
+  hotSpots.value.push(point);
+  fullViewStore.currentHotId = point.id
 }
-// 选中的热点属性变化
-const changePointHandle = (data) => {
-  activePoint.value = lodash.cloneDeep(data);
-  setActivePoint(data);
-}
-// 取消选中的热点
+
 const cancelPointHandle = () => {
-  activePoint.value = {};
+  fullViewStore.currentHotId = ''
 }
 // 删除热点
 const delPointHandle = () => {
-  const points = doc.value.scenes[activeIndex.value].hotSpots;
-  const index = points.findIndex(item => {
-    return item.id === activePoint.value.id
+  const index = hotSpots.value.findIndex(item => {
+    return item.id === fullViewStore.currentHotId
   })
-  points.splice(index, 1)
-  activePoint.value = {};
+  hotSpots.value.splice(index, 1)
+  fullViewStore.currentHotId = ''
 }
 // 生成缩略图
 const createThumbnail = () => {
@@ -227,10 +250,12 @@ const init = async () => {
   isLoading.value = true;
   fullView = new fullViewClass(container)
   fullView.container = document.getElementById('container');
-  const data = doc.value.scenes[0];
-  initCamera(data);
-  await fullView.initContent(data.url)
-  setFullViewParams(params.value)
+  if(currentScene.value) {
+    console.log("🚀 ~ file: Index.vue:224 ~ init ~ currentScene.value", currentScene.value)
+    initCamera(currentScene.value.cameraPos);
+    await fullView.initContent(currentScene.value.url)
+    setFullViewParams(currentScene.value.params)
+  }
   fullView.render();
   isLoading.value = false;
 }
@@ -238,27 +263,27 @@ const init = async () => {
 const changeHandle = (v, key) => {
   switch (key) {
     case 'horizontal':
-      params.value.minAzimuthAngle = v[0];
-      params.value.maxAzimuthAngle = v[1];
+      fullView?.minAzimuthAngle.set(v[0])
+      fullView?.maxAzimuthAngle.set(v[1])
       break;
     case 'vertical':
-      params.value.minPolarAngle = v[0];
-      params.value.maxPolarAngle = v[1];
+      fullView?.minPolarAngle.set(v[0])
+      fullView?.maxPolarAngle.set(v[1])
       break;
-    case 'fov':
-      params.value.minFov = v[0];
-      params.value.maxFov = v[1];
-      break;
+    // case 'fov':
+    //   fullView.minFov.set(v[0])
+    //   fullView.maxFov.set(v[1])
+    //   break;
     default:
       break;
   }
 }
 // 设置当前视觉
 const setCameraPosHandle = () => {
-  doc.value.scenes[activeIndex.value].cameraPos = lodash.cloneDeep(fullView.camera.position);
+  currentScene.value.cameraPos = lodash.cloneDeep(fullView.camera.position);
   // 获取水平角度
-  doc.value.scenes[activeIndex.value].angleX = fullView.controls.getAzimuthalAngle() * 180 / Math.PI;
-  doc.value.scenes[activeIndex.value].params.fov = fullView.camera.fov
+  currentScene.value.angleX = fullView.controls.getAzimuthalAngle() * 180 / Math.PI;
+  currentScene.value.params.fov = fullView.camera.fov
   createThumbnail()
 }
 // 切换左侧菜单
@@ -267,6 +292,13 @@ const changeMenu = (item) => {
   router.push({
     name: item.value
   })
+}
+
+//删除场景
+const delScene = (index) => {
+  fullViewStore.scenes.splice(index, 1)
+  const currentScenesId = fullViewStore.scenes[index]?.id || fullViewStore.scenes[index-1]?.id || ''
+  currentScenesId && (changeSceneHandle(currentScenesId))
 }
 
 // 判断是点击还是拖拽
@@ -333,134 +365,84 @@ const pointDownHandle = (e, item) => {
   document.body.addEventListener('mouseup', mouseUpHandle)
 }
 const findSandMarkerIndex = (sceneId) => {
-  const sandTable = doc.value.sandTable.markers;
-  console.log('sandTable:', sandTable)
-  return sandTable.findIndex(item => {
+  return fullViewStore.sandTable?.markers?.find(item => {
     return item.sceneId === sceneId
   })
 
 }
 // 切换场景
-const changeSceneHandle = async (index) => {
-  const scene = doc.value.scenes[index];
+const changeSceneHandle = async (sceneId) => {
+  fullViewStore.currentScenesId = sceneId
+
   if (route.name === 'sandTable') {
-    activeMarkerIndex.value = findSandMarkerIndex(scene.id)
-    console.log('activeMarkerIndex:', activeMarkerIndex);
+    fullViewStore.currentMarkerId = findSandMarkerIndex(sceneId)?.id
   }
 
-  activeIndex.value = index;
-  params.value = scene.params;
-  setParams(params.value)
   // 选中的热点置空
-  activePoint.value = {};
+  fullViewStore.currentHotId = ''
   // TODO:当前的场景重新渲染 + 生成缩略图
-  await fullView.initContent(activeItem.value.url)
+  const cameraPos = currentScene.value.cameraPos;
+  initCamera(cameraPos)
+  await fullView.initContent(currentScene.value.url)
 
-  setFullViewParams(params.value)
-
-  // 相机位置
-  const cameraPos = activeItem.value.cameraPos;
-  fullView.camera.position.set(cameraPos.x, cameraPos.y, cameraPos.z)
-  // important:通过参数更新相机位置，必须调用controls的update才会生效
-  fullView.controls.update();
+  setFullViewParams(currentScene.value.params)
 
   fullView.render()
 
   createThumbnail();
 }
 
-const setParams = (params) => {
-  polarAngleRange.value = [params.minPolarAngle,params.maxPolarAngle]
-  azimuthAngleRange.value = [params.minAzimuthAngle,params.maxAzimuthAngle]
-  fovRange.value = [params.minFov,params.maxFov]
-}
 const setFullViewParams = (params) => {
   fullView.camera.fov = params.fov;
-  fullView.minFov = params.minFov;
-  fullView.maxFov = params.maxFov;
-  fullView.minAzimuthAngle.set(params.minAzimuthAngle || -180)
-  fullView.maxAzimuthAngle.set(params.maxAzimuthAngle || 180)
-  fullView.minPolarAngle.set(params.minPolarAngle || -90)
-  fullView.maxPolarAngle.set(params.maxPolarAngle || 90)
+  fullView.minFov = params.fovRange?.[0];
+  fullView.maxFov = params.fovRange?.[1];
+  fullView.minAzimuthAngle.set(params.azimuthAngleRange?.[0] || -180)
+  fullView.maxAzimuthAngle.set(params.azimuthAngleRange?.[1] || 180)
+  fullView.minPolarAngle.set(params.polarAngleRange?.[0] || -90)
+  fullView.maxPolarAngle.set(params.polarAngleRange?.[1] || 90)
 }
-watch(() => params.value.minAzimuthAngle, (val) => {
-  if(fullView) {
-    fullView.minAzimuthAngle.set(val)
-  }
-})
-watch(() => params.value.maxAzimuthAngle, (val) => {
-  if(fullView) {
-    fullView.maxAzimuthAngle.set(val)
-  }
-})
-watch(() => params.value.minPolarAngle, (val) => {
-  if(fullView) {
-    fullView.minPolarAngle.set(val)
-  }
-})
-watch(() => params.value.maxPolarAngle, (val) => {
-  if(fullView) {
-    fullView.maxPolarAngle.set(val)
-  }
-})
-watch(() => params.value.minFov, (val) => {
+
+watch(() => currentScene.value?.params?.fovRange[0], (val) => {
   if(fullView) {
     fullView.minFov = val
     fullView.camera.fov = val
     fullView.render()
   }
 })
-watch(() => params.value.maxFov, (val) => {
+watch(() => currentScene.value?.params?.fovRange[1], (val) => {
   if(fullView) {
     fullView.maxFov = val
     fullView.camera.fov = val
     fullView.render()
   }
 })
-watch(() => params.value.fov, (val) => {
+watch(() => currentScene.value?.params?.fov, (val) => {
   if(fullView) {
     fullView.camera.fov = val
     fullView.render()
   }
 })
 
-// 设置选中的热点
-const setActivePoint = (data) => {
-  console.log("🚀 ~ file: Index.vue:441 ~ setActivePoint ~ data", data)
-  const points = doc.value.scenes[activeIndex.value].hotSpots;
-  const index = points.findIndex(item => {
-    return item.id === data.id
-  })
-  points.splice(index, 1, data)
-}
 
 const clickPointHandle = (item) => {
-  activePoint.value = item;
+  fullViewStore.currentHotId = item.id;
 }
 
 const exportAction = () => {
-  console.log('exportAction doc.value:', JSON.stringify(doc.value))
+  // console.log('exportAction doc.value:', JSON.stringify(fullViewStore.value))
 }
 
-const initCamera = (data) => {
-  fullView.camera.position.set(data.cameraPos.x, data.cameraPos.y, data.cameraPos.z)
+const initCamera = (cameraPos) => {
+  // 相机位置
+  // important:通过参数更新相机位置，必须调用controls的update才会生效
+  fullView.camera.position.set(cameraPos.x, cameraPos.y, cameraPos.z)
   fullView.controls.update()
 }
 // 沙盘数据修改
 const changeSandTableHandle = (data) => {
-  doc.value.sandTable = data;
+  fullViewStore.sandTable = data;
 }
-// 寻找目标场景
-const findTargetScene = (id) => {
-  let i = -1;
-  const target = doc.value.scenes.find((item, index) => {
-    if (item.id === id) {
-      i = index;
-    }
-    return item.id === id
-  })
-  return { scene: target, index: i }
-}
+
 const markerItemDownHandle = (e, item, i) => {
   let startX = e.clientX;
   let startY = e.clientY;
@@ -481,11 +463,10 @@ const markerItemDownHandle = (e, item, i) => {
     startY = e.clientY;
   }
   const moveUp = () => {
-    if (activeMarkerIndex.value !== i) {
-      activeMarkerIndex.value = i;
+    if (fullViewStore.currentMarkerId !== item.id) {
+      fullViewStore.currentMarkerId = item.i;
       // 切换场景
-      const { index } = findTargetScene(item.sceneId);
-      changeSceneHandle(index);
+      changeSceneHandle(item.sceneId);
     }
     document.body.removeEventListener('mousemove', mouseMove)
     document.body.removeEventListener('mouseup', moveUp)
@@ -516,7 +497,7 @@ const pointMouseDownHandle = (e, item, index) => {
     item.angle = angle;
 
 
-    doc.value.sandTable.markers[index].angle = angle;
+    // doc.value.sandTable.markers[index].angle = angle;
 
     rotate2cameraPos(angle)
   }
@@ -545,20 +526,92 @@ const rotate2cameraPos = (angle) => {
   fullView.controls.object.position.set(x, y, z);
   fullView.controls.object.lookAt(fullView.controls.target);
   console.log('x:', x, 'y:', y, 'z:', z)
-  doc.value.scenes[activeIndex.value].cameraPos = { x, y, z }
+  currentScene.value.cameraPos = { x, y, z }
   fullView.controls.update();
 }
 
-const changeMarkerIndexHandle = (i, item) => {
-  activeMarkerIndex.value = i;
+const changeMarkerIndexHandle = (item) => {
   //  切换场景
-  const { index } = findTargetScene(item.sceneId);
-  changeSceneHandle(index)
+  changeSceneHandle(item.sceneId)
 }
+
+const onExportModeClick = ()=> {
+      if (typeof Blob !== 'function') {
+        this.$msgbox({
+          type: 'error',
+          message: '浏览器不支持 Blob 请更新浏览器'
+        });
+        return;
+      }
+
+      (async() => {
+        try {
+          const exportObj = {
+            id: fullViewStore.id,
+            name: fullViewStore.name,
+            scenes: lodash.cloneDeep(fullViewStore.scenes),
+            sandTable: lodash.cloneDeep(fullViewStore.sandTable)
+          }
+          progress.value = 2;
+          exportLoading.value = true;
+
+          const assetsUrl = []
+          function addAssets(data) {
+            if(!assetsUrl.some(item => {item.data === data.data})) {
+              assetsUrl.push(data)
+            }
+          }
+          // 获取资源id
+          exportObj.scenes?.forEach(scene => {
+            const sceneUrlId = randomString()
+            const sceneUrl = `${sceneUrlId}.${scene.url.split('.')?.[1]}`
+            addAssets({
+              fileID: sceneUrl,
+              data: scene.url
+            })
+            scene.url = sceneUrl
+            scene?.hotSpots?.forEach(hotSpot => {
+              const hotUrlId = randomString()
+              const hotUrl = `${hotUrlId}.${hotSpot.iconPath.split('.')?.[1]}`
+              addAssets({
+                fileID: hotUrl,
+                data: hotSpot.iconPath
+              })
+              hotSpot.iconPath = hotUrl
+            })
+          })
+
+          progress.value = 23;
+          const sandTableUrlId = randomString()
+          const sandTableUrl = `${sandTableUrlId}.${exportObj.sandTable.url.split('.')?.[1]}`
+          addAssets({
+            fileID: sandTableUrl,
+            data: exportObj.sandTable.url
+          })
+          exportObj.sandTable.url = sandTableUrl
+          progress.value = 30;
+          // 生成的压缩包 blob
+          const blob = await generatePackage(exportObj, assetsUrl);
+
+          progress.value = 99;
+
+          // 生成链接
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `全景.zip`;
+          // 模拟点击下载
+          link.click();
+        } catch (e) {
+          console.error(e);
+        } finally {
+          exportLoading.value = false;
+          progress.value = 0;
+        }
+      })();
+    }
 onMounted(() => {
   activeName.value = route.name;
-  params.value = doc.value.scenes[activeIndex.value].params
-  setParams(params.value)
   nextTick(async () => {
     await init();
 
@@ -575,12 +628,10 @@ onMounted(() => {
       }])
 
 
-      if (activeMarkerIndex.value === -1) return
-      const marker = doc.value.sandTable.markers[activeMarkerIndex.value];
-      const { scene } = findTargetScene(marker.sceneId);
-      marker.angle += scene.angleX
-      marker.angle = marker.angle % 360;
-      // scene.angleX = angleX
+      if (!fullViewStore.currentMarkerId) return
+      currentMarker.value.angle += (angleX - currentScene.value.angleX)
+      currentMarker.value.angle = currentMarker.value.angle % 360;
+      currentScene.value.angleX = angleX
     }
     fullView.controls.addEventListener('change', controlChangeHandle);
     window.addEventListener('resize', fullView.resizeHandle);
@@ -730,6 +781,27 @@ onMounted(() => {
       margin-top: 10px;
       margin-right: 10px;
       cursor: pointer;
+      &:hover {
+        .scene-item__del {
+          display: flex;
+        }
+      }
+      &__del {
+        position: absolute;
+        right: 0;
+        top: 0;
+        color: #fff;
+        border-radius: 50%;
+        background-color: #00000088;
+        width: 20px;
+        height: 20px;
+        font-size: 10px;
+        @include flex(center, center);
+        display: none;
+        &:hover {
+          color: skyblue
+        }
+      }
 
       &.is-active {
         border: 2px solid $--color-primary;

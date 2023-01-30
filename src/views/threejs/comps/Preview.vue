@@ -1,5 +1,5 @@
 <template>
-  <v-card class="preview-wrapper" ref="$el">
+  <div class="preview-wrapper" ref="$el">
     <!--      <v-card-title>作品预览</v-card-title>-->
     <div id="preview">
     </div>
@@ -52,7 +52,7 @@
         </div>
       </div>
     </div>
-  </v-card>
+  </div>
 </template>
 
 <script>
@@ -82,7 +82,7 @@ const props = defineProps({
 
 const $el = ref()
 // 热点
-const poiObjects = ref([])
+let poiObjects = []
 // 热点原始数据
 const hotPointList = ref([])
 const uniqueId = ref('')
@@ -175,7 +175,7 @@ const transformStyle = computed(()=> {
         data.sphere.transparent = true;
         fullView.sphere.material = data.sphere;
       } else {
-        fullView.initContent(data.url)
+        await fullView.initContent(data.url)
       }
 
       gsap.to(data.sphere, {
@@ -184,17 +184,16 @@ const transformStyle = computed(()=> {
         duration: 1.5,
         onComplete: async () => {
           // 重新渲染热点
-          poiObjects.value = await renderPointList(fullView.scene, data.hotSpots);
+          poiObjects = await renderPointList(fullView.scene, data.hotSpots);
           hotLabelStyles()
         }
       });
-
-      fullView.camera.fov = data.params.fov;
-      // 更新摄像机投影矩阵。在任何参数被改变以后必须被调用
-      fullView.camera.updateProjectionMatrix();
       // 相机位置
       const cameraPos = data.cameraPos;
       fullView.camera.position.set(cameraPos.x, cameraPos.y, cameraPos.z)
+      setFullViewParams(data.params)
+      // 更新摄像机投影矩阵。在任何参数被改变以后必须被调用
+      fullView.camera.updateProjectionMatrix();
       // important:通过参数更新相机位置，必须调用controls的update才会生效
       fullView.controls.update();
     }
@@ -220,16 +219,17 @@ const transformStyle = computed(()=> {
             // 关闭大小跟随相机距离变化的特性
             sizeAttenuation: !!item.sizeAttenuation,
           });
-      fullView.sprite = new THREE.Sprite(material);
+      material.rotation = degToRad(0)
+      const sprite = new THREE.Sprite(material);
       const {scaleX, scaleY} = calcSpriteScale(item, fullView.camera.fov, fullView.container)
-      fullView.sprite.scale.set(scaleX, scaleY);
+      sprite.scale.set(scaleX, scaleY);
 
       // 位置信息
       const position = item.pos
-      fullView.sprite.position.set(position.x, position.y, position.z)
-      fullView.sprite.detail = item
-      fullView.scene.add(fullView.sprite);
-      return {sprite:fullView.sprite, annie}
+      sprite.position.set(position.x, position.y, position.z)
+      sprite.detail = item
+      fullView.scene.add(sprite);
+      return {sprite, annie}
     }
     // 渲染热点列表(点击范围)
     const  renderPointList = async(scene, hotPoints) =>{
@@ -270,11 +270,16 @@ const transformStyle = computed(()=> {
       fullView = new fullViewClass(container)
       rotate.value = lodash.get(props.doc, 'sandTable.markers[0].angle') || 0;
       initCamera(data);
+      fullView.controls.update()
+      fullView.render()
+
       // 等待内容渲染完成，才去渲染热点
       fullView.initContent(data.url)
+      fullView.onMouseWheelCb = hotLabelStyles
+      setFullViewParams(data.params)
       // 渲染热点
       const points = data.hotSpots
-      poiObjects.value = await renderPointList(fullView.scene, points)
+      poiObjects = await renderPointList(fullView.scene, points)
       // ??:解决热点文字显示隐藏问题，问题暂时未定位出来
       setTimeout(() => {
         hotLabelStyles();
@@ -337,7 +342,7 @@ const transformStyle = computed(()=> {
 
       raycaster.setFromCamera(mouse, fullView.camera)
 
-      const intersects = raycaster.intersectObjects(poiObjects.value);
+      const intersects = raycaster.intersectObjects(poiObjects);
 
       console.log('intersects:', intersects);
 
@@ -348,7 +353,15 @@ const transformStyle = computed(()=> {
         pointLabelClickHandle(detail)
       }
     }
-
+    const setFullViewParams = (params) => {
+      fullView.camera.fov = params.fov;
+      fullView.minFov = params.fovRange?.[0];
+      fullView.maxFov = params.fovRange?.[1];
+      fullView.minAzimuthAngle.set(params.azimuthAngleRange?.[0] || -180)
+      fullView.maxAzimuthAngle.set(params.azimuthAngleRange?.[1] || 180)
+      fullView.minPolarAngle.set(params.polarAngleRange?.[0] || -90)
+      fullView.maxPolarAngle.set(params.polarAngleRange?.[1] || 90)
+    }
     const resizeHandle = ()=> {
       const width = fullView.container.clientWidth;
       const height = fullView.container.clientHeight;
@@ -378,7 +391,7 @@ const transformStyle = computed(()=> {
       const y = r * Math.sin(phi + Math.PI / 2) + fullView.controls.target.y;
       const z = r * Math.cos(phi - Math.PI / 2) * Math.cos(theta) + fullView.controls.target.z;
       fullView.controls.object.position.set(x, y, z);
-      fullView.controls.object.lookAt(controls.target);
+      fullView.controls.object.lookAt(fullView.controls.target);
       fullView.controls.update();
       return {x, y, z}
     }

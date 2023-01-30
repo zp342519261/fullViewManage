@@ -8,7 +8,7 @@
     </div>
 
 
-    <div transition="slide-x-reverse-transition" v-if="drawer" class="right-panel" height="100vh" :right="true"
+    <div transition="slide-x-reverse-transition" v-if="fullViewStore.currentHotId" class="right-panel" height="100vh" :right="true"
       :hide-overlay="true" @input="toggleDrawerHandle">
       <div class="pa-4">
         <div class="header">
@@ -22,28 +22,29 @@
         <div class="body">
           <el-form>
             <el-form-item label="图标">
-              <el-select v-model="form.iconType" @change="changeIconTypeHandle">
-                <el-option v-for="item in items" :key="item.value" :label="item.label" :value="item.value"></el-option>
+              <el-select v-model="fullViewStore.currentHot.iconType" @change="changeIconTypeHandle">
+                <el-option v-for="item in iconTypes" :key="item.value" :label="item.label"
+                  :value="item.value"></el-option>
               </el-select>
               <!-- 系统图表列表-->
-              <div class="sys-icon-list" v-show="form.iconType === 'sys'">
+              <div class="sys-icon-list" v-show="fullViewStore.currentHot.iconType === 'sys'">
                 <div class="icon-item" v-for="(item, index) in sysIcons"
-                  :class="{ 'is-active': form.iconPath === item.spriteUrl }" :key="index"
+                  :class="{ 'is-active': fullViewStore.currentHot.iconPath === item.spriteUrl }" :key="index"
                   @click="changeIconHandle(item)">
                   <img :src="item.url">
                 </div>
               </div>
-              <el-input v-show="form.iconType === 'custom'" label="图标地址" v-model="form.iconPath"
-                @change="changeHandle" placeholder="请输入图标链接">
+              <el-input v-show="fullViewStore.currentHot.iconType === 'custom'" label="图标地址" v-model="fullViewStore.currentHot.iconPath"
+                placeholder="请输入图标链接">
               </el-input>
               <div>图标大小</div>
-              <el-slider v-model="form.iconSize" :min="10" :max="100" @change="changeHandle"></el-slider>
+              <el-slider v-model="fullViewStore.currentHot.iconSize" :min="10" :max="100"></el-slider>
             </el-form-item>
 
 
 
             <el-form-item label="热点类型">
-              <el-select :items="hotTypes" item-text="label" item-value="value" v-model="form.hotType">
+              <el-select :items="hotTypes" item-text="label" item-value="value" v-model="fullViewStore.currentHot.hotType">
                 <el-option v-for="item in hotTypes" :key="item.value" :label="item.label" :value="item.value">
                 </el-option>
               </el-select>
@@ -51,12 +52,12 @@
                 选择目标全景
                 <el-button @click="isShowSceneDlg = true">选择场景
                 </el-button>
-                <div class="selected-scene" v-if="selectedScene.id">
+                <div class="selected-scene" v-if="selectScene?.id">
                   <div class="selected-scene__img">
-                    <img :src="selectedScene.url" alt="">
+                    <img :src="selectScene.url" alt="">
                   </div>
                   <div class="selected-scene__name">
-                    {{ selectedScene.name }}
+                    {{ selectScene.name }}
                   </div>
                 </div>
               </div>
@@ -66,11 +67,11 @@
             <div class="form-item">
               <div class="form-item__label">
                 <span>标题</span>
-                <el-checkbox label="显示" v-model="form.title.show" @change="changeHandle">
+                <el-checkbox label="显示" v-model="fullViewStore.currentHot.title.show">
                 </el-checkbox>
               </div>
               <div class="form-item__value">
-                <el-input v-model="form.title.label" @change="changeHandle" placeholder="请输入标题">
+                <el-input v-model="fullViewStore.currentHot.title.label" placeholder="请输入标题">
                 </el-input>
               </div>
             </div>
@@ -83,169 +84,47 @@
         </div>
       </div>
     </div>
-    <SceneDlg v-if="isShowSceneDlg" :visible="isShowSceneDlg" :doc="doc" :scene-id="form.value"
+    <SceneDlg v-if="isShowSceneDlg" :visible="isShowSceneDlg" :doc="fullViewStore" :scene-id="fullViewStore.currentHot.value"
       @close="isShowSceneDlg = false" @sure="sureHandle">
     </SceneDlg>
   </div>
 </template>
 
-<script>
+<script setup>
+import {ref, computed,watch} from 'vue'
 import lodash from 'lodash'
+import { useFullView } from '@/store/fullView'
 import {randomString} from '@/assets/js/utils.js'
-import SceneDlg from './Scene.vue'
 import {SYS_ICON_MAP} from '@/assets/js/const.js'
-// TODO: 热点：自定义雪碧图
-export default {
-  name: 'hot-spot',
-  data() {
-    return {
-      drawer: false,
-      items: [
-        {
-          label: '系统图标',
-          value: 'sys'
-        },
-        {
-          label: '自定义图标',
-          value: 'custom'
-        }
-      ],
-      hotTypes: [
-        {
-          label: '全景切换',
-          value: 'scene'
-        },
-        {
-          label: '超链接',
-          value: 'link'
-        },
-        {
-          label: '图片热点',
-          value: 'img'
-        },
-        {
-          label: '视频热点',
-          value: 'video'
-        },
-        {
-          label: '图文热点',
-          value: 'list'
-        },
-        {
-          label: '环物热点',
-          value: 'around'
-        },
-        {
-          label: '文章热点',
-          value: 'article'
-        }
-      ],
-      sysIcons: [
-        {
-          key: 'forward',
-          url: 'img/new_spotd1_gif.png',
-          spriteUrl: 'img/arrow1.png',
-          gif: true,
-          "texture": {
-            "horizontalNum": 1,
-            "verticalNum": 25,
-            "numTiles": 25,
-            "duration": 50
-          },
-        },
-        {
-          key: 'left',
-          url: 'img/new_spotd2_gif.png',
-          spriteUrl: 'img/arrow2.png',
-          gif: true,
-          "texture": {
-            "horizontalNum": 1,
-            "verticalNum": 25,
-            "numTiles": 25,
-            "duration": 50
-          },
-        },
-        {
-          url: 'img/new_spotd1.png',
-          spriteUrl: 'img/new_spotd1.png',
-          gif: false
-        }
-      ],
-      form: {
-        iconType: 'sys',
-        iconPath: 'img/arrow1.png',
-        iconSize: 80,
-        gif: true, // 是否是帧动画图
-        "texture": {
-          "horizontalNum": 1,
-          "verticalNum": 25,
-          "numTiles": 25,
-          "duration": 50
-        },
-        hotType: 'scene',
-        value: '',
-        pos: {
-          x: 0,
-          y: 0,
-          z: 0.1
-        },
-        "title": {
-          "label": "",
-          "show": true
-        }
-      },
-      isShowSceneDlg: false
-    }
-  },
-  components: {SceneDlg},
-  props: {
-    list: {
-      type: Array,
-      default: () => {
-        return []
+import {iconTypes, hotTypes,sysIcons} from '../config'
+import SceneDlg from './Scene.vue'
+
+const emit = defineEmits(["change", 'cancel', 'addPoint', 'delPoint'])
+
+const fullViewStore = useFullView()
+const isShowSceneDlg = ref(false)
+
+const selectScene = computed(() => {
+  return fullViewStore.getScene(fullViewStore.currentHot?.value)
+})
+const changeIconHandle = (item) => {
+  fullViewStore.currentHot.iconPath = SYS_ICON_MAP[item.url]
+  fullViewStore.currentHot.gif = item.gif
+  fullViewStore.currentHot.texture = item.texture
+}
+const changeIconTypeHandle = () => {
+  if (fullViewStore.currentHot.iconType) {
+    fullViewStore.currentHot.gif = false
+  }
+}
+const addPointHandle = () => {
+      if(!fullViewStore.currentScene) {
+        return
       }
-    },
-    activePoint: {
-      type: Object,
-      default: () => {
-        return {}
-      }
-    },
-    doc: {
-      type: Object,
-      default: () => {
-        return {
-          scenes: []
-        }
-      }
-    }
-  },
-  computed: {
-    selectedScene() {
-      return this.doc.scenes.find(item => {
-        return item.id === this.form.value
-      }) || {}
-    }
-  },
-  methods: {
-    changeIconHandle(item) {
-      this.form.iconPath = SYS_ICON_MAP[item.url]
-      this.form.gif = item.gif
-      this.form.texture = item.texture
-      this.changeHandle()
-    },
-    changeIconTypeHandle() {
-      if (this.form.iconType) {
-        this.form.gif = false
-      }
-      this.changeHandle()
-    },
-    addPointHandle() {
-      this.drawer = true;
-      this.form = {
+      emit('addPoint', {
         id: randomString(),
         iconType: 'sys',
-        iconPath: 'img/arrow1.png',
+        iconPath: '/img/arrow1.png',
         iconSize: 80,
         hotType: 'scene',
         gif: true,
@@ -264,45 +143,22 @@ export default {
           label: '',
           show: true
         }
-      }
-      this.$emit('addPoint', this.form)
-    },
-    toggleDrawerHandle(v) {
-      console.log('toggleDrawerHandle:', v)
-    },
-    sureHandle(data) {
-      this.form.value = data.id;
-      this.isShowSceneDlg = false;
-      this.changeHandle();
-    },
-    changeHandle() {
-      this.$emit('change', this.form)
-    },
-    // 取消选中的热点
-    closeDrawHandle() {
-      this.drawer = false;
-      this.$emit('cancel')
-    },
-    // 删除热点
-    delPointHandle() {
-      this.$emit('delPoint');
+      })
     }
-  },
-  watch: {
-    activePoint: {
-      handler(n) {
-        console.log('activePoint watch:', n)
-        this.form = lodash.cloneDeep(n)
-        if (n && n.id) {
-          this.drawer = true;
-          console.log('activePoint n:', this.drawer)
-        } else {
-          this.drawer = false;
-        }
-      },
-      deep: true
-    }
-  }
+const toggleDrawerHandle = (v) => {
+  console.log('toggleDrawerHandle:', v)
+}
+const sureHandle = (data) => {
+  fullViewStore.currentHot.value = data.id;
+  isShowSceneDlg.value = false;
+}
+ // 取消选中的热点
+const closeDrawHandle = () => {
+  emit('cancel')
+}
+// 删除热点
+const delPointHandle = () => {
+  emit('delPoint');
 }
 </script>
 
